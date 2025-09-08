@@ -1,2 +1,2 @@
 # DATA608
-Knowlede and Visual Analytics
+Knowlegde and Visual Analytics
