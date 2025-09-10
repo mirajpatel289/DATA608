@@ -1,0 +1,189 @@
+---
+title: "Story 1 - Infrastructure Investment & Jobs Act Funding Allocation"
+author: "Miraj Patel"
+date: "2025-09-05"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE)
+```
+
+```{r load libraries, echo=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(scales)
+library(ggrepel)
+```
+
+### Introduction
+
+For this story, we will be looking at The Infrastructure Investment and Jobs Act (IIJA) and seek to answer two key questins regarding the allocation of its funds as of March 2023. The goal of this analysis is to answer two primary questions:
+
+1. Is the allocation equitable based on the population of each of the States and Territories, or is bias apparent?
+
+2. Does the allocation favor the political interests of the Biden administration?
+
+To answer these questions, I sourced data from three separate files: an Excel sheet of IIJA funding, a US Census Bureau Excel file for population estimates, and a CSV file of the 2020 election results.
+
+```{r load data, echo=FALSE}
+
+funding_raw <- read_excel("C:/Users/PATELM70/Desktop/CUNY/DATA608/Story 1/IIJA FUNDING AS OF MARCH 2023.xlsx")
+
+population_raw <- read_excel("C:/Users/PATELM70/Desktop/CUNY/DATA608/Story 1/NST-EST2024-POP.xlsx")
+
+electoral_raw <- read.csv("https://raw.githubusercontent.com/mirajpatel289/DATA608/70f3cb0794820cdaabdbb6992cc90683821ab2cc/voting.csv")
+```
+
+
+### Data Cleaning
+
+The raw data from these disparate sources required significant cleaning and merging to prepare for analysis. A key challenge was standardizing the state and territory names across all three data sets, which had different formats such as abbreviations, full names, and name with typos.
+
+For example, the raw funding data contained misspellings and capitalization inconsistencies. In the dplyr package, I used recode function to fix  known issues before a general case-standardization rule was applied.
+
+```{r clean funding, population. & electoral dataframes, echo=FALSE}
+
+#Prepare population data
+population <- population_raw %>%
+  slice(-c(1:8, 60, 62:67)) %>%
+  select(-c(2, 3, 4, 5, 7)) %>%
+  rename(State = 1, `Population 2023` = 2) %>%
+  mutate(State_Name = sub("^\\.", "", State)) %>%
+  select(State_Name, Population = `Population 2023`) %>%
+  mutate(Population = as.numeric(Population)) %>%
+  arrange(State_Name)
+  
+  
+#Prepare funding data
+funding <- funding_raw %>%
+  select(
+    `State_Name` = 1, 
+    `Total Funding (Billions)` = 2
+  ) %>%
+  mutate(
+    State_Name = trimws(State_Name),
+    State_Name = str_to_title(State_Name),
+    State_Name = recode(State_Name,
+                        "Deleware" = "Delaware",
+                        "District Of Columbia" = "District of Columbia"
+                       ),
+    `Total Funding (Billions)` = as.numeric(`Total Funding (Billions)`)
+  )
+
+#Prepare electoral data
+electoral <- electoral_raw %>%
+  arrange(state) %>%
+  select(
+    state,
+    biden_vote,
+    trump_vote,
+    trump_win,
+    biden_win
+  ) %>%
+  rename(
+    State_Name = state,
+    Biden_Votes = biden_vote,
+    Trump_Votes = trump_vote
+  ) %>%
+  mutate(State_Name = str_to_title(State_Name))
+```
+
+### Analysis 1: Is the allocation equitable based on the population of each of the States and Territories, or is bias apparent?
+
+To assess equity, the total funding for each state was divided by its population to calculate a "Funding Per Person" metric. I used a bar chart as it was the most effect way to compare "Funding Per Person" across all states. 
+
+```{r analysis for allocation based on population, echo=FALSE}
+
+allocation <- inner_join(population, funding, by = "State_Name")
+
+allocation <- allocation %>%
+  mutate(Funding_Per_Population = (`Total Funding (Billions)` / Population) * 10^9)
+```
+
+```{r allocation plotting, echo=FALSE}
+
+allocation <- allocation %>%
+  mutate(Highlight = case_when(
+    Funding_Per_Population == max(Funding_Per_Population) ~ "Largest",
+    Funding_Per_Population == min(Funding_Per_Population) ~ "Smallest",
+    TRUE                                                 ~ "Normal"
+  )) %>%
+  mutate(Display_Label = ifelse(Highlight == "Normal", "", State_Name))
+```
+
+``` {r bar chart, echo=FALSE}
+
+ggplot(allocation, aes(x = reorder(State_Name, -Funding_Per_Population), y = Funding_Per_Population)) +
+  geom_col(aes(fill = Highlight)) +
+  scale_fill_manual(
+    values = c("Largest" = "#d95f02", "Smallest" = "#7570b3", "Normal" = "grey80"),
+    name = ""
+  ) +
+  scale_x_discrete(labels = setNames(allocation$Display_Label, allocation$State_Name)) +
+  scale_y_continuous(labels = dollar_format()) +
+  labs(
+    title = "Funding Per Capita by State/Territory",
+    x = "State / Territory",
+    y = "Funding Per Person"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+The analysis reveals a significant disparity in per-capita funding. The distribution is not equitable; some states receive many times more funding per person than others.Some factors that could play a major role in this allocation are geography, existing infrastructure, and/or specific grant formulas.
+
+One of the limitations was that I was not able to find a reliable source to gather population data of American territories such as Guam or American Samoa. Due to this limitation, they were excluded from analysis.
+
+### Analysis 2: Does the allocation favor the political interests of the Biden administration?
+
+To investigate potential political bias, I grouped the states by the winner of their 2020 presidential election votes. A box plot is used to compare the distribution of per-capita funding between these two groups.
+
+```{r merge electoral, funding, population, echo=FALSE}
+
+political <- electoral %>%
+  left_join(population, by = "State_Name") %>%
+  left_join(funding, by = "State_Name") %>%
+  na.omit() %>%
+  mutate(
+    Winner_2020 = ifelse(biden_win == 1, "Biden", "Trump"),
+    Funding_Per_Population = (`Total Funding (Billions)` / Population) * 10^9
+  )
+```
+
+```{r zoomed in box plot, echo=FALSE}
+ggplot(political, aes(x = Winner_2020, y = Funding_Per_Population, fill = Winner_2020)) +
+  geom_boxplot(alpha = 0.7, width = 0.9) +
+  
+  geom_text_repel(
+    data = filter(political, 
+                  Funding_Per_Population == max(Funding_Per_Population) | 
+                  Funding_Per_Population == min(Funding_Per_Population)),
+    aes(label = State_Name),
+    box.padding = 0.5
+  ) +
+  scale_fill_manual(values = c("Biden" = "#2c7bb6", "Trump" = "#d7191c")) +
+  scale_y_continuous(labels = dollar_format()) +
+  coord_cartesian(ylim = c(0, 1500)) +
+  labs(
+    title = "Funding Per Capita by 2020 Election Winner (Zoomed In)",
+    subtitle = "Note: Y-axis is limited; some outliers are not shown",
+    x = "2020 Winner",
+    y = "Funding Per Person"
+  ) +
+  theme_minimal()
+```
+
+This chart shows that the median funding per person is very similar for all states regardless who they voted for. However, the average for Trump-won states is skewed significantly higher by a few outliers, most notably Alaska. This indicates that while the typical state from either group receives a similar amount of funding, the allocation disproportionately benefits a few low-population states, which in this election cycle were won by the Republican candidate. Therefore, this analysis does not find evidence of a pro-Biden bias, but highlights the significant impact of outliers.
+
+### Conclusion
+
+This analysis concludes that IIJA funding is not allocated equitably on a simple per-capita basis, with large variances between states. There is also no evidence to suggest a political bias favoring states won by the Biden administration in 2020.In the end, it’s not about political favoritism. The funding rules give much more money per person to smaller states, which happen to lean Republican.
